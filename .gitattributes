@@ -1,0 +1,3 @@
+# Preserve immutable upstream bytes and unified-diff context, including blank context lines.
+upstream/* -whitespace
+patches/*.patch -whitespace

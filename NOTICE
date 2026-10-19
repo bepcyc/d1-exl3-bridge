@@ -1,0 +1,13 @@
+D1 ↔ ExLlamaV3 experimental bridge
+
+Original bridge glue and synthetic tests: Copyright (c) 2026 Viacheslav Rodionov.
+
+LiquidAI/d1-3B upstream source/config snapshots and derivative AMD patches use
+revision 051bcc464b01b9f92942b364d9586b0ef5912432:
+https://huggingface.co/LiquidAI/d1-3B/tree/051bcc464b01b9f92942b364d9586b0ef5912432
+Their license is reproduced verbatim in upstream/LICENSE (LFM Open License v1.0).
+No rights to author models or weights are granted by the MIT license on the glue.
+
+The patches add prominent modification notices and change attention dispatch /
+query chunking and tokenwise MLP chunking. Historical source hashes and limits
+are documented separately; this is not an endorsement by Liquid AI or ExLlamaV3.

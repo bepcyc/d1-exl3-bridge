@@ -1,0 +1,6 @@
+# Keep source checks independent of configuration outside this checkout.
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]
