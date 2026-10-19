@@ -1,0 +1,57 @@
+--- a/hybrid.py
++++ b/hybrid.py
+@@ -1,3 +1,5 @@
++# Modified by Viacheslav Rodionov (2026): AMD explicit attention / bounded FFN compatibility.
++# Derived from LiquidAI/d1-3B; see upstream/LICENSE and NOTICE.
+ """The pieces every LFM hybrid is made of, and the one shape that makes many
+ questions cost about one forward.
+ 
+@@ -116,14 +118,18 @@
+ 
+ 
+ # queries per explicit product off the flash kernels, which bounds its fp32 scores
+-CHUNK = 1024
++CHUNK = 256
+ 
+ 
+ def _fused(q: Tensor) -> bool:
+-    """Whether the flash kernels take these queries: a GPU in half precision, ROCm or CUDA from Ampere on."""
+-    if not q.is_cuda or q.dtype not in (torch.float16, torch.bfloat16):
++    # The qualified gfx1030 Torch rejects its AOTriton Flash kernel. Use the
++    # author's existing GPU float32 _explicit route; no CPU fallback.
++    if torch.version.hip:
++        if not q.is_cuda:
++            raise RuntimeError("GPU-only author attention required")
+         return False
+-    return bool(torch.version.hip) or torch.cuda.get_device_capability(q.device)[0] >= 8
++    return q.is_cuda and q.dtype in (torch.float16, torch.bfloat16) and torch.cuda.get_device_capability(q.device)[0] >= 8
++
+ 
+ 
+ def _explicit(q: Tensor, k: Tensor, v: Tensor, allowed: Tensor | None, scale: float) -> tuple[Tensor, Tensor]:
+@@ -210,10 +216,21 @@
+ 
+ 
+ def causal_attention(q: Tensor, k: Tensor, v: Tensor, window: int | None, scale: float) -> Tensor:
+-    """Right-padded chains: causal, within `window` if set."""
+-    if window is None or q.shape[2] <= window:
+-        return F.scaled_dot_product_attention(q, k, v, is_causal=True, scale=scale, enable_gqa=True)
+-    return _windowed(q, k, v, window, scale)
++    """Exact author GPU math, query-chunked to avoid a full 32k-square score."""
++    if not all(t.is_cuda for t in (q, k, v)):
++        raise RuntimeError("GPU-only author attention required")
++    outputs = []
++    keys = torch.arange(k.shape[2], device=q.device)[None, :]
++    for start in range(0, q.shape[2], CHUNK):
++        end = min(start + CHUNK, q.shape[2])
++        positions = torch.arange(start, end, device=q.device)[:, None]
++        allowed = keys <= positions
++        if window is not None:
++            allowed &= keys > positions - window
++        output, _lse = _explicit(q[:, :, start:end], k, v, allowed, scale)
++        outputs.append(output.to(q.dtype))
++    return torch.cat(outputs, dim=2)
++
+ 
+ 
+ def attention(q: Tensor, k: Tensor, v: Tensor, tree: Tree | None, window: int | None, scale: float) -> Tensor:
