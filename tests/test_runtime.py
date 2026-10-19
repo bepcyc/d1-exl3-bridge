@@ -92,7 +92,12 @@ class RuntimeTests(unittest.TestCase):
         self.torch = types.SimpleNamespace(
             inference_mode=contextlib.nullcontext,
             cuda=types.SimpleNamespace(
-                device=lambda _: contextlib.nullcontext(), empty_cache=lambda: None
+                device=lambda _: contextlib.nullcontext(),
+                empty_cache=lambda: None,
+                memory_allocated=lambda _: 0,
+                memory_reserved=lambda _: 0,
+                max_memory_allocated=lambda _: 0,
+                max_memory_reserved=lambda _: 0,
             ),
         )
         self.modules = patch.dict(
@@ -298,6 +303,9 @@ except SystemExit as e: assert e.code==0
             def close(self):
                 self.closed = True
 
+            def stats(self):
+                return {"native_unload": {"status": "NOT_REQUESTED"}}
+
         instance = Fake(None)
         stdout = io.StringIO()
         line = (
@@ -347,6 +355,9 @@ except SystemExit as e: assert e.code==0
 
             def close(self):
                 self.closed = True
+
+            def stats(self):
+                return {"native_unload": {"status": "NOT_REQUESTED"}}
 
         instance = Fake()
         try:

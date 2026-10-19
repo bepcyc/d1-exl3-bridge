@@ -3,13 +3,17 @@
 import importlib.metadata
 import gc
 import traceback
+import sys
 from pathlib import Path
 
 from .checkpoint import inspect_checkpoint
 from .guards import DeviceGuard, dispatch_guard, unsafe_cuda_fault
 
 
-def load(config):
+def load(config, *, resources=None):
+    # Runtime owns rollback when given this private partial-resource ledger.
+    if resources is not None:
+        return _load(config, resources)
     resources = {}
     try:
         return _load(config, resources)
@@ -43,6 +47,8 @@ def _load(config, resources):
 
     if importlib.metadata.version("exllamav3").split("+")[0] != "1.6.2":
         raise RuntimeError("This bridge targets the ExLlamaV3 1.6.2 integration")
+    resources["device"] = config.device
+    resources["cuda_attempted"] = True
     if not torch.cuda.is_available():
         raise RuntimeError("A GPU runtime is required; CPU inference is not supported")
     device = torch.device(config.device)
@@ -58,6 +64,7 @@ def _load(config, resources):
     hook = torch.nn.modules.module.register_module_forward_pre_hook(
         lambda module, args: guard.before(module, args, {})
     )
+    resources["handles"] = [hook]
     try:
         with dispatch_guard(torch, device):
             model, info = AutoModel.from_pretrained(
@@ -70,7 +77,17 @@ def _load(config, resources):
             )
             resources["model"] = model
     finally:
-        hook.remove()
+        original_error = sys.exception()
+        try:
+            hook.remove()
+        except BaseException as cleanup_error:
+            if original_error is None:
+                raise
+            original_error.add_note(
+                "Loader hook cleanup failed: " + type(cleanup_error).__name__
+            )
+        else:
+            resources["handles"].remove(hook)
     if (
         info.get("unexpected_keys")
         or set(info.get("missing_keys", [])) - {"lm_head.weight"}

@@ -58,6 +58,43 @@ allowed; learned execution stays on the chosen GPU. Torch uses cuda:N for both
 CUDA and ROCm. Independent processes can serve different GPUs without hostname
 or GPU-brand assumptions.
 
+For a dedicated worker process, add `--exclusive-worker-native-cleanup` (or set
+`RuntimeConfig(exclusive_worker_native_cleanup=True)`). This explicitly asserts
+that the process has no other ExLlamaV3/native-cache users. The bridge rejects
+overlapping managed runtime loads while this mode is active; it cannot detect
+unmanaged native users, so do not enable it in a shared application process.
+
+After removing model hooks and references, exclusive close releases the native
+tensor cache and calls `exllamav3.util.memory.free_mem`. The existing 300-second
+CLI idle timeout uses this same close path. Library callers own their idle timer.
+Read `runtime.stats()['native_unload']` after close: `RELEASED` requires successful
+cleanup and measured Torch allocated/reserved bytes both zero. These allocator
+measurements do not mean zero physical VRAM use: the process CUDA context can
+remain. Unopened close reports `NOT_LOADED` with unknown memory values and does
+not import or initialize CUDA. Default mode reports `NOT_REQUESTED` and does not
+clear process-global native caches.
+
+Failed loads still raise their original exception; their rollback receipt has
+`load_failed=True`. A proven pre-CUDA failure reports `PRE_CUDA_LOAD_FAILED`
+without GPU measurements. A partial load can report successful rollback only
+after the same measured cleanup as normal close. Unsafe CUDA contexts, cleanup
+errors or nonzero measured memory never report `RELEASED`; these block further
+managed loads in that process. Start a new worker after unproven cleanup. The
+exclusive CLI returns a failure status in this case; `--stats` retains the
+cleanup receipt on stderr. Repeated close retains the first receipt. Reservations
+also survive a runtime being garbage-collected without close, preventing a new
+exclusive load from assuming that orphaned native state was released.
+Explicit cleanup always emits a receipt on CLI stderr, even without `--stats`;
+failed cleanup also does so in default mode and causes an unsuccessful exit.
+If a request and cleanup both fail, the original request error is preserved.
+
+While loaded and safe, `stats()['cuda_memory']` samples current and peak allocated
+and reserved Torch bytes for the runtime device. These are process allocator
+measurements, not per-model or physical VRAM measurements. Collect them after
+warm and target workloads before close. `cuda_memory_current` is false before
+load, after close, or in an unsafe context; those calls perform no CUDA queries
+and retain only an earlier timestamped sample if one exists.
+
 ```python
 from pathlib import Path
 from d1_exl3 import D1Runtime, RuntimeConfig

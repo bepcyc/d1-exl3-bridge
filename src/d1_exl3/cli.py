@@ -82,6 +82,11 @@ def main(argv=None):
     parser.add_argument("--token-budget", type=int, default=65536)
     parser.add_argument("--idle-seconds", type=float, default=300)
     parser.add_argument("--stats", action="store_true")
+    parser.add_argument(
+        "--exclusive-worker-native-cleanup",
+        action="store_true",
+        help="Dedicated process only: clear global native scratch on close and verify zero allocator usage",
+    )
     parser.add_argument("--model-sha256")
     parser.add_argument("--maximum-tiles", type=int, default=11)
     parser.add_argument("--maximum-branches", type=int, default=256)
@@ -101,6 +106,7 @@ def main(argv=None):
         expected_model_sha256=args.model_sha256,
         maximum_path_tokens=args.maximum_path_tokens,
         maximum_packed_tokens=args.maximum_packed_tokens,
+        exclusive_worker_native_cleanup=args.exclusive_worker_native_cleanup,
     )
     runtime = D1Runtime(config)
     queue = lines(getattr(sys.stdin, "buffer", sys.stdin))
@@ -139,9 +145,31 @@ def main(argv=None):
                 for image in owned:
                     image.close()
     finally:
-        runtime.close()
-        if args.stats:
-            print(json.dumps(runtime.stats(), allow_nan=False), file=sys.stderr)
+        original_error = sys.exception()
+        try:
+            with contextlib.redirect_stdout(sys.stderr):
+                runtime.close()
+        except BaseException as cleanup_error:
+            if original_error is None:
+                raise
+            original_error.add_note(
+                "Runtime cleanup also failed: " + type(cleanup_error).__name__
+            )
+        finally:
+            final_stats = runtime.stats()
+            unload = final_stats["native_unload"]
+            accepted = (
+                ("RELEASED", "NOT_LOADED")
+                if args.exclusive_worker_native_cleanup
+                else ("RELEASED", "NOT_LOADED", "NOT_REQUESTED")
+            )
+            cleanup_failed = unload["status"] not in accepted
+            if args.stats:
+                print(json.dumps(final_stats, allow_nan=False), file=sys.stderr)
+            elif args.exclusive_worker_native_cleanup or cleanup_failed:
+                print(json.dumps(unload, allow_nan=False), file=sys.stderr)
+    if cleanup_failed:
+        return 1
     return 0
 
 
