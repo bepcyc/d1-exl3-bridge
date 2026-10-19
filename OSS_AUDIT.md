@@ -84,12 +84,12 @@ This is reviewable experimental source, not a turnkey runtime or model release.
 
 - **P1 addressed:** README names exact revision/format, two-stage use, metadata
   manifest creation, separate GPU quantization/loading gates, patch effects and
-  noncommercial author-license obligations. Historical results separate modified
+  author-license commercial-use conditions. Historical results separate modified
   wrapper from historical runtime code. No standalone installation claim.
 - **P0 for a weight redistribution release:** no derivative model/license/model
   card/public synthetic quality run/clean reproducible runtime package is prepared.
   Impact: a weight release would overstate its acceptance and permissions. Smallest
-  fix: do not publish weights as part of this code-only draft; prepare separately.
+  fix: do not publish weights as part of this source release; prepare separately.
 
 ## File-level changes
 
@@ -108,9 +108,10 @@ This is reviewable experimental source, not a turnkey runtime or model release.
 
 ## Do first / do later
 
-Do first: root source/privacy/license review, rerun final CPU tests, commit only
-this isolated source tree, and publish an explicitly experimental draft if the
-source-only scope is accepted. Check actual public bytes; remote CI is not configured.
+Source-release checks: independent source/privacy/license review and all 11 CPU
+tests passed before publication. Release contents contain only the isolated source
+tree; no weights or private inputs are included. The release is experimental, and
+remote CI is not configured. See `CHANGELOG.md` for its supported scope.
 
 Do later: independent GPU runtime/build recipe, typed quality/parity/capacity,
 performance benchmarking, supported-device matrix and any separately licensed
