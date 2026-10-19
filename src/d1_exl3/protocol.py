@@ -62,6 +62,8 @@ def validate_response(response, questions):
                 raise RuntimeError("D1 probabilities/confidence are inconsistent")
             if kind == "choice" and answer["choice"] not in expected:
                 raise RuntimeError("D1 returned an unknown choice")
+            if kind == "choice" and probabilities[answer["choice"]] != max(values):
+                raise RuntimeError("D1 choice differs from its probability argmax")
             if kind == "score" and not 0 <= answer["score"] <= len(criteria) - 1:
                 raise RuntimeError("D1 score is outside its requested ordinal range")
             if kind == "score" and (
