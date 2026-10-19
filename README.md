@@ -5,10 +5,13 @@ retaining D1's original multimodal decision model**. The bridge prepares and
 reassembles checkpoints; your application continues to use the author's D1
 implementation for image inputs, typed questions and decision probabilities.
 
-**Current status:** experimental checkpoint tools with synthetic tests and
-separately documented historical runtime evidence. This repository does not yet
-provide a complete download-and-deploy D1 service. The checkpoint tools are
-independent of GPU vendor; optional AMD patches are a separate component below.
+The Python package and resident JSONL CLI expose D1's original typed decisions
+and probabilities, using EXL3 for its language body. Supply your own state,
+questions and images; checkpoint path, device and capacity are configurable.
+
+**Validation:** conversion and runtime contracts pass CPU tests. GPU acceptance
+of the new portable runtime is pending. Historical GPU results remain separate in
+[HISTORICAL_RESULTS.md](HISTORICAL_RESULTS.md).
 
 - [The deployment experience we want](#the-deployment-experience-we-want)
 - [Why simply loading D1 is not enough](#why-simply-loading-d1-is-not-enough)
@@ -19,6 +22,80 @@ independent of GPU vendor; optional AMD patches are a separate component below.
 - [Runtime integration](#runtime-integration)
 - [Optional AMD compatibility patches](#optional-amd-compatibility-patches)
 - [License and upstream return](#licensing-and-upstream-return)
+
+## Run typed decisions
+
+Use Python 3.12+ with the installed GPU build of Torch and ExLlamaV3 1.6.2,
+Transformers 5.14.1, Accelerate, Safetensors and Pillow. Install the bridge without
+replacing those compiled dependencies:
+
+```sh
+uv pip install --python "$D1_PYTHON" --no-deps .
+uv run --offline --no-project --python "$D1_PYTHON" python -m d1_exl3 \
+  --model "$D1_MODEL" --device cuda:0 \
+  --minimum-free-gib 14 --allocator-gib 13 --stats < requests.jsonl
+```
+
+D1_MODEL is your assembled q8/mul1 checkpoint directory, including the verified
+author code, tokenizer and processor files. Loading is local-only. Set memory
+flags from your own per-GPU calculation and measured workload. This example
+approximates the historical 16 GiB full-context profile, not a universal fit claim.
+
+One JSON object per line requests one answer; an array requests a native batch.
+Output is one JSON object/array per line, in input order:
+
+```json
+{"state":{"request":"Refund the duplicate order"},"questions":{"refund":{"type":"noul","instructions":"Is a refund explicitly requested?"}}}
+```
+
+For images, add an images list containing path or base64 objects. JSON/text
+state, images and named noul/choice/score questions use the author's decision API,
+without chat generation or intermediate captions.
+
+The first request loads once; later lines reuse that model. EOF or 300 seconds of
+input inactivity closes the runtime and exits. CPU decoding/tokenization is
+allowed; learned execution stays on the chosen GPU. Torch uses cuda:N for both
+CUDA and ROCm. Independent processes can serve different GPUs without hostname
+or GPU-brand assumptions.
+
+```python
+from pathlib import Path
+from d1_exl3 import D1Runtime, RuntimeConfig
+
+config = RuntimeConfig(
+    model=Path("./my-d1-exl3"),
+    minimum_free_bytes=15_000_000_000,
+    allocator_limit_bytes=14_000_000_000,
+    device="cuda:0",
+)
+with D1Runtime(config) as d1:
+    result = d1.system_one(
+        {"total":23},
+        {"large":{"type":"noul","instructions":"Is total greater than 20?"}},
+    )
+    batch = d1.system_one_batch([
+        ({"total":8},{"large":{"type":"noul","instructions":"Is total greater than 20?"}}),
+        ({"total":42},{"large":{"type":"noul","instructions":"Is total greater than 20?"}}),
+    ])
+    probabilities = d1.probabilities(
+        {"total":23},
+        [{"type":"noul","instructions":"Is total greater than 20?"}],
+    )
+```
+
+Native batching is preserved: single-question image-free requests pack together;
+multiple questions share their own state; image requests run native serial B1.
+This does not claim tensor batching of images. Path, packed-token, branch and
+tile limits are checked before learned execution without truncation. Default
+capacity: model 32768-token paths,98048 packed tokens,65536 branch budget,
+256 branches and11 total vision tiles. Raising limits requires a matching memory
+plan and qualification. Models are not moved or offloaded after loading.
+
+The optional runtime extra declares dependencies for new environments. CUDA/ROCm
+EXL3 builds and optional AMD patches must match the installed Torch backend.
+The 11 conversion tests remain dependency-free; new runtime tests use injected
+fakes and original author readout without models or GPU. Tests cover typed
+results, ordering, admission, native EXL3-loader contracts and residency.
 
 ## The deployment experience we want
 
@@ -32,7 +109,7 @@ That is the problem this project addresses. D1's published checkpoint and custom
 execution path do not become a native ExLlamaV3 deployment just because its text
 backbone belongs to a supported model family. There are several integration
 steps between those two points, and this repository currently supplies the
-checkpoint conversion steps.
+checkpoint conversion and runtime integration.
 
 If the author's original Transformers implementation already meets your needs,
 you can use it directly. This bridge is for developers who specifically want to
@@ -114,7 +191,7 @@ Author D1 checkpoint
 | Prepare D1 weights for the text-model quantizer | `project`, with topology and hash checks | Obtain and verify the author's checkpoint |
 | Quantize the language body | A compatible projected checkpoint and a strict assembly contract | Run the official quantizer with a suitable runtime and memory budget |
 | Reconstruct the multimodal checkpoint | `assemble`, preserving non-body payloads and restoring names | Validate loading and trained head tying in the intended runtime |
-| Use D1's original decisions and image inputs | A route that retains the author's implementation | Wire and test its actual API, probabilities, images and batching |
+| Use D1 decisions, probabilities and images | d1_exl3 Python API and resident JSONL CLI | Qualify the chosen GPU/backend and capacity |
 | Deploy a complete service | No server or automatic launcher is included | Serving, lifecycle, concurrency and end-to-end feature validation |
 | Address particular AMD execution issues | Optional, separately scoped patches | Validate them on the intended GPU/runtime and workload |
 
@@ -167,9 +244,9 @@ are structural/byte checks, not proof of trained numerical quality.
 
 ## Requirements and tests
 
-Python 3.11+ and `uv`; the 11 tests were verified locally on Python 3.12.
-Remote CI is not configured in this source-only publication scope; no remote CI
-result is claimed. The CLI has no third-party Python dependency and imports no
+Checkpoint tools require Python3.11+; the optional runtime package requires
+Python 3.12+. All 31 CPU tests pass, including the original 11 conversion/patch
+tests. Remote CI is not configured. The checkpoint CLI has no third-party dependency and imports no
 Torch, Transformers or ExLlama runtime. Patch tests also require the standard
 `patch` executable. Run from a checkout:
 
@@ -245,13 +322,17 @@ In the qualified historical route, explicitly calling
 Reject missing/unexpected/mismatched weights, require 166 actual `Exl3HfLinear`
 body replacements, call the author's head-tying operation after loading, and check
 that `lm_head.weight is get_input_embeddings().weight`. These are runtime
-validation requirements; the conversion CLI does not perform the model load.
+validation requirements implemented by the runtime loader, including exact
+replacement names and quantized-buffer placement. The checkpoint-conversion
+CLI remains separate and never loads a model.
 
 Test the features you intend to expose through the resulting service: typed
 answers and probability outputs, image questions, multiple questions sharing a
 state, and `system_one_batch()`. Quantized-layer counts and a successful forward
-pass do not establish complete D1 behavior. The included synthetic tests verify
-conversion structure and bytes; they do not perform those feature comparisons.
+pass alone does not establish complete D1 behavior. CPU tests cover original
+author readout, arbitrary states/questions, ordering, raw probabilities, native
+loader guards and teardown. GPU numerical/parity/capacity checks are the next
+acceptance step for each backend profile.
 
 ## Optional AMD compatibility patches
 

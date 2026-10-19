@@ -1,0 +1,28 @@
+[project]
+name = "d1-exl3-bridge"
+version = "0.2.0a1"
+description = "Author D1 typed decisions with an EXL3 language body, plus checkpoint tools"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+d1-exl3 = "d1_exl3.cli:main"
+
+[tool.uv.build-backend]
+module-name = "d1_exl3"
+
+[project.optional-dependencies]
+runtime = [
+    "accelerate>=1.15,<2",
+    "exllamav3==1.6.2",
+    "pillow>=12,<13",
+    "safetensors>=0.8,<1",
+    "torch>=2.9",
+    "transformers==5.14.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.1,<0.13.0"]
+build-backend = "uv_build"
