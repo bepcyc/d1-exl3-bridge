@@ -136,13 +136,13 @@ feature parity. The remaining runtime and quality checks are explicit in
 
 ## Get the code
 
-The implementation is currently proposed in [draft PR #1](https://github.com/bepcyc/d1-exl3-bridge/pull/1).
-To inspect that branch:
+The experimental source release is `v0.1.0-alpha.1`. Use its fixed tag to reproduce
+the checkpoint-tool tests:
 
 ```sh
 git clone https://github.com/bepcyc/d1-exl3-bridge.git
 cd d1-exl3-bridge
-git switch feat/source-only-no-ci
+git checkout v0.1.0-alpha.1
 ```
 
 ## What the bridge preserves
@@ -175,6 +175,7 @@ Torch, Transformers or ExLlama runtime. Patch tests also require the standard
 
 ```sh
 uv run --no-project --python 3.12 python -B -m unittest discover -s tests -v
+uvx --from ruff==0.17.1 ruff check adapter.py contract.py make_manifest.py tests
 ```
 
 Tests fabricate tiny shapes with the complete tensor topology, run the actual CLI,
