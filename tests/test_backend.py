@@ -229,6 +229,30 @@ class BackendTests(unittest.TestCase):
         self.assertTrue(self.handle.removed)
         self.assertIn(("cleanup",), self.events)
 
+    def test_managed_partial_ledger_exposes_real_loader_state_without_own_cleanup(self):
+        def failed(*args, **kwargs):
+            raise RuntimeError("managed constructor failure")
+
+        sys.modules["transformers"].AutoModel.from_pretrained = failed
+        resources = {}
+        with self.assertRaisesRegex(RuntimeError, "managed constructor"):
+            backend.load(self.config, resources=resources)
+        self.assertIs(resources["torch"], sys.modules["torch"])
+        self.assertEqual(resources["device"], "cuda:0")
+        self.assertTrue(resources["cuda_attempted"])
+        self.assertEqual(resources["handles"], [])
+        self.assertTrue(self.handle.removed)
+        self.assertNotIn(("cleanup",), self.events)
+
+    def test_managed_post_validation_failure_retains_model_for_runtime_rollback(self):
+        self.info["missing_keys"] = ["model.language_model.embed_tokens.weight"]
+        resources = {}
+        with self.assertRaises(RuntimeError):
+            backend.load(self.config, resources=resources)
+        self.assertIs(resources["model"], self.model)
+        self.assertTrue(resources["cuda_attempted"])
+        self.assertTrue(self.handle.removed)
+
 
 if __name__ == "__main__":
     unittest.main()

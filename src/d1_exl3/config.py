@@ -16,8 +16,11 @@ class RuntimeConfig:
     maximum_vision_tiles: int = 11
     expected_model_sha256: str | None = None
     maximum_path_tokens: int | None = None
+    exclusive_worker_native_cleanup: bool = False
 
     def __post_init__(self):
+        if type(self.exclusive_worker_native_cleanup) is not bool:
+            raise ValueError("exclusive_worker_native_cleanup must be a boolean")
         object.__setattr__(self, "model", Path(self.model).expanduser().resolve())
         if not self.device.startswith("cuda:") or not self.device[5:].isdigit():
             raise ValueError(
